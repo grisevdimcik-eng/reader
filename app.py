@@ -11,7 +11,7 @@ import socket
 import time
 import warnings
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
 import httpx
 import trafilatura
@@ -185,11 +185,66 @@ NEXT_RE = re.compile(r"^\W*(далее|дальше|вперед|вперёд|с
 PREV_RE = re.compile(r"^\W*(назад|предыдущ\w*|пред\.?|prev\w*|previous|anterior|back)\W*$|^\W*[«‹←<]+\W*$", re.I)
 
 
+PAGE_KEYS = ("p", "page", "pg", "pagenum", "page_num")
+
+
+def numeric_pagination(soup: BeautifulSoup, url: str) -> dict | None:
+    """Страницы, пронумерованные в адресе (…?id=5&p=2): находит текущий номер, общее число и соседей."""
+    try:
+        sp = urlsplit(url)
+    except ValueError:
+        return None
+    q = parse_qsl(sp.query, keep_blank_values=True)
+    qd = dict(q)
+    for key in PAGE_KEYS:
+        base = {k: v for k, v in qd.items() if k != key}
+        pages = set()
+        for a in soup.find_all("a", href=True):
+            full = safe_join(url, a["href"])
+            if not full:
+                continue
+            try:
+                s2 = urlsplit(full)
+            except ValueError:
+                continue
+            if s2.hostname != sp.hostname or s2.path != sp.path:
+                continue
+            q2 = dict(parse_qsl(s2.query, keep_blank_values=True))
+            v = q2.pop(key, None)
+            if v and v.isdigit() and q2 == base:
+                pages.add(int(v))
+        has_cur = key in qd and qd[key].isdigit()
+        if not has_cur and len(pages) < 2:
+            continue
+        cur = int(qd[key]) if has_cur else 1
+
+        def with_page(n: int) -> str:
+            items, done = [], False
+            for k, v in q:
+                if k == key:
+                    items.append((k, str(n)))
+                    done = True
+                else:
+                    items.append((k, v))
+            if not done:
+                items.append((key, str(n)))
+            return urlunsplit((sp.scheme, sp.netloc, sp.path, urlencode(items), ""))
+
+        total = max(pages | {cur}) if pages else None
+        return {
+            "page": cur,
+            "total": total,
+            "next": with_page(cur + 1) if (total is None or cur < total) else None,
+            "prev": with_page(cur - 1) if cur > 1 else None,
+        }
+    return None
+
+
 def find_neighbors(raw: bytes, url: str) -> dict:
     """Ищет на странице ссылки «дальше» и «назад»: rel=next/prev, затем по тексту ссылки."""
     soup = BeautifulSoup(raw, "lxml")
     host = urlparse(url).hostname
-    out = {"next": None, "prev": None}
+    out = {"next": None, "prev": None, "page": None, "total": None}
 
     def ok(href):
         if not href or href.startswith(("#", "javascript:", "mailto:")):
@@ -215,6 +270,12 @@ def find_neighbors(raw: bytes, url: str) -> dict:
             if rel in rels and (hit := ok(tag.get("href"))):
                 out[key] = hit
                 break
+    num = numeric_pagination(soup, url)
+    if num:
+        out["page"], out["total"] = num["page"], num["total"]
+        for key in ("next", "prev"):
+            if not out[key]:
+                out[key] = num[key]
     for key, rx in (("next", NEXT_RE), ("prev", PREV_RE)):
         if out[key]:
             continue

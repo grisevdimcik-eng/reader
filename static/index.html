@@ -246,7 +246,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     if(d.next)pbtn("next","Далее →",d.next);
     nextUrl=d.next||null;prevUrl=d.prev||null;
     $("nextTop").hidden=!nextUrl;$("prevTop").hidden=!prevUrl;
-    $("barHost").textContent=d.host;
+    $("barHost").textContent=d.host+(d.page&&d.total?" · "+d.page+" из "+d.total:d.page?" · стр. "+d.page:"");
     show("article");
     addRecent({url:currentUrl,title:d.title,host:d.host});
     var saved=parseFloat(lsGet("reader.pos."+currentUrl)||"0");

@@ -165,13 +165,47 @@ def test_api_returns_readable_error_on_crash():
     assert r.status_code == 500 and "RuntimeError" in r.json()["detail"], r.text
 
 
+def numbered_page(links: str) -> bytes:
+    return f"""<html><head><title>Книга</title></head><body><div class="menu"><a href="/">Главная</a></div>
+<div class="content">{paras(0, 6)}</div><div class="pages">{links}</div></body></html>""".encode()
+
+
+LINKS = '<a href="read_book.php?id=80398&p=1">1</a> <a href="read_book.php?id=80398&p=2">2</a> <a href="read_book.php?id=80398&p=3">3</a> … <a href="read_book.php?id=80398&p=40">40</a>'
+
+
+def test_numbered_pages_first():
+    r = app.extract(numbered_page(LINKS), "https://loveread.ec/read_book.php?id=80398&p=1", "text/html")
+    assert r["next"] == "https://loveread.ec/read_book.php?id=80398&p=2", r["next"]
+    assert r["prev"] is None and r["page"] == 1 and r["total"] == 40, (r["prev"], r["page"], r["total"])
+
+
+def test_numbered_pages_middle_and_last():
+    r = app.extract(numbered_page(LINKS), "https://loveread.ec/read_book.php?id=80398&p=5", "text/html")
+    assert r["next"].endswith("&p=6") and r["prev"].endswith("&p=4"), (r["next"], r["prev"])
+    r = app.extract(numbered_page(LINKS), "https://loveread.ec/read_book.php?id=80398&p=40", "text/html")
+    assert r["next"] is None and r["prev"].endswith("&p=39"), (r["next"], r["prev"])
+
+
+def test_numbered_pages_without_links_and_without_param():
+    r = app.extract(numbered_page(""), "https://loveread.ec/read_book.php?id=80398&p=3", "text/html")
+    assert r["next"].endswith("&p=4") and r["prev"].endswith("&p=2"), (r["next"], r["prev"])
+    r = app.extract(numbered_page(LINKS), "https://loveread.ec/read_book.php?id=80398", "text/html")
+    assert r["page"] == 1 and r["next"].endswith("&p=2"), (r["page"], r["next"])
+
+
+def test_other_book_links_not_confused():
+    other = '<a href="read_book.php?id=999&p=7">другая книга</a><a href="read_book.php?id=999&p=8">стр</a>'
+    r = app.extract(numbered_page(other), "https://loveread.ec/read_book.php?id=80398&p=1", "text/html")
+    assert r["total"] is None or r["total"] == 1, r["total"]
+
+
 def main():
     failed = 0
     for case in CASES:
         problems = check_case(*case)
         print(f"{case[0]:32}", "OK" if not problems else "ПРОВАЛ: " + "; ".join(problems))
         failed += bool(problems)
-    for fn in (test_heading_first_in_content, test_br_paragraphs, test_title_not_swallowing_real_heading, test_no_duplicate_text, test_junk_in_middle_not_added, test_heading_in_separate_wrapper, test_normal_text_unchanged, test_malformed_links_dont_crash, test_xml_declaration_and_cp1251, test_api_returns_readable_error_on_crash):
+    for fn in (test_heading_first_in_content, test_br_paragraphs, test_title_not_swallowing_real_heading, test_no_duplicate_text, test_junk_in_middle_not_added, test_heading_in_separate_wrapper, test_normal_text_unchanged, test_malformed_links_dont_crash, test_xml_declaration_and_cp1251, test_api_returns_readable_error_on_crash, test_numbered_pages_first, test_numbered_pages_middle_and_last, test_numbered_pages_without_links_and_without_param, test_other_book_links_not_confused):
         try:
             fn()
             print(f"{fn.__name__:32} OK")
