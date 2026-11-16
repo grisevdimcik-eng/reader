@@ -4,10 +4,12 @@
 """
 import asyncio
 import ipaddress
+import logging
 import os
 import re
 import socket
 import time
+import warnings
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -16,9 +18,19 @@ import trafilatura
 import textfix
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.requests import Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+warnings.filterwarnings("ignore", category=UserWarning, module="bs4")
+try:
+    from bs4 import XMLParsedAsHTMLWarning
+
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+except ImportError:
+    pass
+
+log = logging.getLogger("reader")
 BASE = Path(__file__).parent
 MAX_BYTES = 8 * 1024 * 1024  # максимум 8 МБ на страницу
 MAX_REDIRECTS = 5
@@ -35,6 +47,21 @@ HEADERS = {
     "Accept-Language": "ru,en;q=0.8,es;q=0.6",
 }
 
+def safe_join(base: str, href: str) -> str | None:
+    """urljoin, который не падает на битых ссылках вроде http://[abc"""
+    try:
+        return urljoin(base, href)
+    except ValueError:
+        return None
+
+
+def safe_scheme(url: str | None) -> str:
+    try:
+        return urlparse(url or "").scheme
+    except ValueError:
+        return ""
+
+
 ALLOWED_TAGS = {
     "p", "br", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li",
     "em", "i", "strong", "b", "u", "s", "sub", "sup", "code", "pre", "hr", "a",
@@ -44,6 +71,18 @@ ALLOWED_TAGS = {
 ALLOWED_ATTRS = {"a": {"href"}, "img": {"src", "alt"}}
 
 app = FastAPI(title="Читалка")
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    """Любая неожиданная ошибка: пишем подробности в лог и показываем читателю понятное сообщение."""
+    log.exception("Ошибка при обработке %s", request.url)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Внутренняя ошибка читалки ({type(exc).__name__}). Пришли это сообщение разработчику."},
+    )
+
+
 _cache: dict[str, tuple[float, dict]] = {}
 
 
@@ -62,7 +101,11 @@ def _is_public(host: str) -> bool:
 
 
 async def _check_url(url: str) -> None:
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+        parsed.hostname  # noqa: B018  (может бросить ValueError)
+    except ValueError:
+        raise HTTPException(400, "Не получилось разобрать ссылку. Проверь, что она скопирована целиком.")
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise HTTPException(400, "Нужна ссылка, которая начинается с http:// или https://")
     ok = await asyncio.get_running_loop().run_in_executor(None, _is_public, parsed.hostname)
@@ -81,7 +124,9 @@ async def fetch(url: str) -> tuple[bytes, str, str]:
                         loc = resp.headers.get("location")
                         if not loc:
                             raise HTTPException(502, "Сайт вернул пустой редирект.")
-                        url = urljoin(url, loc)
+                        url = safe_join(url, loc)
+                        if not url:
+                            raise HTTPException(502, "Сайт вернул некорректный редирект.")
                         continue
                     if resp.status_code >= 400:
                         raise HTTPException(502, f"Сайт ответил ошибкой {resp.status_code}.")
@@ -105,6 +150,8 @@ def sanitize(html: str, base_url: str) -> str:
     soup = BeautifulSoup(html, "lxml")
     root = soup.body or soup
     for tag in root.find_all(True):
+        if getattr(tag, "parent", None) is None:
+            continue  # уже удалён вместе с родителем
         if tag.name not in ALLOWED_TAGS:
             if tag.name in ("script", "style", "iframe", "object", "embed", "form", "svg", "noscript"):
                 tag.decompose()
@@ -116,16 +163,16 @@ def sanitize(html: str, base_url: str) -> str:
             if attr not in allowed:
                 del tag.attrs[attr]
         if tag.name == "a":
-            href = urljoin(base_url, tag.attrs.get("href", ""))
-            if urlparse(href).scheme in ("http", "https"):
+            href = safe_join(base_url, tag.attrs.get("href", ""))
+            if safe_scheme(href) in ("http", "https"):
                 tag.attrs["href"] = href
                 tag.attrs["target"] = "_blank"
                 tag.attrs["rel"] = "noopener noreferrer"
             else:
                 tag.unwrap()
         elif tag.name == "img":
-            src = urljoin(base_url, tag.attrs.get("src", ""))
-            if urlparse(src).scheme in ("http", "https"):
+            src = safe_join(base_url, tag.attrs.get("src", ""))
+            if safe_scheme(src) in ("http", "https"):
                 tag.attrs["src"] = src
                 tag.attrs["loading"] = "lazy"
                 tag.attrs["referrerpolicy"] = "no-referrer"
@@ -147,8 +194,14 @@ def find_neighbors(raw: bytes, url: str) -> dict:
     def ok(href):
         if not href or href.startswith(("#", "javascript:", "mailto:")):
             return None
-        full = urljoin(url, href).split("#")[0]
-        p = urlparse(full)
+        full = safe_join(url, href)
+        if not full:
+            return None
+        full = full.split("#")[0]
+        try:
+            p = urlparse(full)
+        except ValueError:
+            return None
         if p.scheme not in ("http", "https") or p.hostname != host:
             return None
         if full.rstrip("/") == url.split("#")[0].rstrip("/"):
@@ -188,9 +241,15 @@ def extract(raw: bytes, url: str, ctype: str) -> dict:
         meta = {"title": title}
     else:
         soup = BeautifulSoup(raw, "lxml")
-        textfix.normalize(soup)
+        html_for_extract = raw
+        try:
+            textfix.normalize(soup)
+            html_for_extract = str(soup)
+        except Exception:
+            log.exception("textfix.normalize упал, читаем без него")
+            soup = None
         body = trafilatura.extract(
-            str(soup),
+            html_for_extract,
             url=url,
             output_format="html",
             include_images=True,
@@ -199,9 +258,11 @@ def extract(raw: bytes, url: str, ctype: str) -> dict:
             include_formatting=True,
             favor_recall=True,
         )
-        if body:
-            body = textfix.recover(soup, body)
-            body = textfix.drop_nav_paragraphs(body)
+        if body and soup is not None:
+            try:
+                body = textfix.drop_nav_paragraphs(textfix.recover(soup, body))
+            except Exception:
+                log.exception("textfix.recover упал, оставляем результат как есть")
         md = trafilatura.extract_metadata(raw, default_url=url)
         meta = {
             "title": getattr(md, "title", None),
@@ -224,7 +285,12 @@ def extract(raw: bytes, url: str, ctype: str) -> dict:
             if a and (a == b or (b.startswith(a) and len(a) >= 0.6 * len(b))):
                 first.decompose()
                 body = "".join(str(c) for c in soup0.body.children)
-    neighbors = {"next": None, "prev": None} if "text/plain" in ctype else find_neighbors(raw, url)
+    neighbors = {"next": None, "prev": None}
+    if "text/plain" not in ctype:
+        try:
+            neighbors = find_neighbors(raw, url)
+        except Exception:
+            log.exception("не удалось найти ссылки далее/назад")
     text_len = len(BeautifulSoup(body, "lxml").get_text(" ", strip=True))
     words = len(BeautifulSoup(body, "lxml").get_text(" ", strip=True).split())
     return {

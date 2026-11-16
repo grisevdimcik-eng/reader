@@ -134,13 +134,44 @@ def test_normal_text_unchanged():
     assert re.search(r"<(em|i)>курсив</(em|i)>", out) and re.search(r"<(strong|b)>жирный</(strong|b)>", out), "форматирование внутри абзаца потеряно"
 
 
+def test_malformed_links_dont_crash():
+    html = page('<a href="http://[abc">битая</a><a rel="next" href="http://[::1">далее</a><img src="http://[x">')
+    out = run(html)
+    assert out.count(LONG) == 6
+
+
+def test_xml_declaration_and_cp1251():
+    raw = ('<?xml version="1.0" encoding="windows-1251"?><html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1251"/>'
+           '<title>Книга</title></head><body>' + paras(0, 6) + '</body></html>').encode("cp1251")
+    out = run(raw)
+    assert out.count(LONG) == 6
+
+
+def test_api_returns_readable_error_on_crash():
+    from fastapi.testclient import TestClient
+
+    async def fake_fetch(url):
+        return page("<p>Абзац №99. текст</p>"), url, "text/html"
+
+    def boom(*a, **k):
+        raise RuntimeError("тестовый сбой")
+
+    orig_fetch, orig_extract = app.fetch, app.extract
+    app.fetch, app.extract = fake_fetch, boom
+    try:
+        r = TestClient(app.app, raise_server_exceptions=False).get("/api/read", params={"url": "https://example.test/x"})
+    finally:
+        app.fetch, app.extract = orig_fetch, orig_extract
+    assert r.status_code == 500 and "RuntimeError" in r.json()["detail"], r.text
+
+
 def main():
     failed = 0
     for case in CASES:
         problems = check_case(*case)
         print(f"{case[0]:32}", "OK" if not problems else "ПРОВАЛ: " + "; ".join(problems))
         failed += bool(problems)
-    for fn in (test_heading_first_in_content, test_br_paragraphs, test_title_not_swallowing_real_heading, test_no_duplicate_text, test_junk_in_middle_not_added, test_heading_in_separate_wrapper, test_normal_text_unchanged):
+    for fn in (test_heading_first_in_content, test_br_paragraphs, test_title_not_swallowing_real_heading, test_no_duplicate_text, test_junk_in_middle_not_added, test_heading_in_separate_wrapper, test_normal_text_unchanged, test_malformed_links_dont_crash, test_xml_declaration_and_cp1251, test_api_returns_readable_error_on_crash):
         try:
             fn()
             print(f"{fn.__name__:32} OK")
