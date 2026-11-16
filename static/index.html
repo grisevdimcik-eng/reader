@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Читалка</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Раскладка: узкая колонка текста по центру, всё управление спрятано в верхней панели. */
+:root{
+  --bg:#f5f6f3; --surface:#ffffff; --fg:#1c2421; --muted:#68726d; --line:#dfe3dd; --accent:#2c6b52; --accent-fg:#ffffff; --mark:#d9ebe1;
+  --ui:"Source Sans 3",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:"Literata",Georgia,"Times New Roman",serif;
+  --read-font:var(--serif); --read-size:19px; --read-lh:1.7; --read-width:38rem;
+  color-scheme:light;
+}
+:root[data-theme="sepia"]{--bg:#efe6d2;--surface:#f7efdd;--fg:#3a3024;--muted:#7d6e57;--line:#dccfb4;--accent:#8a4f1d;--accent-fg:#fff8ec;--mark:#e8d6b0}
+:root[data-theme="dark"]{--bg:#111416;--surface:#1a1e21;--fg:#d7dbd8;--muted:#8c9691;--line:#2a3034;--accent:#7cc4a2;--accent-fg:#0d1512;--mark:#25382f;color-scheme:dark}
+@media (prefers-color-scheme:dark){
+  :root[data-theme="auto"]{--bg:#111416;--surface:#1a1e21;--fg:#d7dbd8;--muted:#8c9691;--line:#2a3034;--accent:#7cc4a2;--accent-fg:#0d1512;--mark:#25382f;color-scheme:dark}
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:16px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);transition:background .2s,color .2s}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+
+/* ---------- Верхняя панель ---------- */
+.bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;height:52px;background:var(--bg);border-bottom:1px solid var(--line);margin:0 calc(-1 * max(16px,env(safe-area-inset-left,0px)));padding:0 max(16px,env(safe-area-inset-left,0px))}
+.bar .host{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:14px}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:40px;padding:0 10px;border:0;border-radius:10px;background:transparent;color:var(--fg);font-weight:500}
+.ibtn:hover{background:var(--surface)}
+.progress{position:absolute;left:0;bottom:-1px;height:2px;width:100%;transform-origin:left;transform:scaleX(0);background:var(--accent)}
+
+/* ---------- Главная ---------- */
+.home{max-width:40rem;margin:0 auto;padding-block:12vh 4rem}
+.home h1{font-family:var(--serif);font-weight:600;font-size:clamp(2rem,6vw,2.9rem);line-height:1.1;letter-spacing:-.01em;margin:0 0 .6rem;text-wrap:balance}
+.home p.lead{color:var(--muted);font-size:1.1rem;margin:0 0 2rem;max-width:30rem}
+.form{display:flex;gap:8px;flex-wrap:wrap}
+.form input{flex:1 1 16rem;min-width:0;height:52px;padding:0 16px;border-radius:12px;border:1px solid var(--line);background:var(--surface)}
+.form input::placeholder{color:var(--muted)}
+.btn{height:52px;padding:0 24px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-fg);font-weight:600}
+.btn:hover{filter:brightness(1.08)}
+.err{margin:16px 0 0;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg)}
+.recent{margin-top:3rem}
+.recent h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin:0 0 .5rem}
+.recent ul{list-style:none;margin:0;padding:0}
+.recent li{border-top:1px solid var(--line)}
+.recent a{display:flex;justify-content:space-between;gap:12px;padding:12px 0;color:inherit;text-decoration:none}
+.recent a:hover .t{color:var(--accent)}
+.recent .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.recent .m{flex:none;color:var(--muted);font-size:.9rem;font-variant-numeric:tabular-nums}
+
+/* ---------- Статья ---------- */
+.article{max-width:var(--read-width);margin:0 auto;padding-block:36px 6rem;font-family:var(--read-font);font-size:var(--read-size);line-height:var(--read-lh);hyphens:auto;overflow-wrap:break-word}
+.article header{margin-bottom:2.2em;font-family:var(--ui)}
+.article h1.title{font-family:var(--read-font);font-size:1.75em;line-height:1.2;font-weight:600;margin:0 0 .5em;text-wrap:balance}
+.meta{color:var(--muted);font-size:.78em;display:flex;flex-wrap:wrap;gap:4px 14px}
+.body>*{min-width:0}
+.body p{margin:0 0 1.1em}
+.body h1,.body h2,.body h3,.body h4{line-height:1.25;margin:1.8em 0 .6em;font-weight:600;text-wrap:balance}
+.body h1{font-size:1.5em}.body h2{font-size:1.3em}.body h3{font-size:1.12em}
+.body a{color:var(--accent);text-underline-offset:3px}
+.body blockquote{margin:1.4em 0;padding:.1em 0 .1em 1.1em;border-left:3px solid var(--line);color:var(--muted)}
+.body img{display:block;max-width:100%;height:auto;margin:1.4em auto;border-radius:6px}
+.body figure{margin:1.4em 0}.body figcaption{font-family:var(--ui);font-size:.8em;color:var(--muted);text-align:center}
+.body ul,.body ol{padding-left:1.4em;margin:0 0 1.1em}.body li{margin:.3em 0}
+.body hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.body pre{overflow-x:auto;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:8px;font-size:.82em;line-height:1.5}
+.body code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88em}
+.body table{display:block;overflow-x:auto;border-collapse:collapse;font-family:var(--ui);font-size:.85em;max-width:100%}
+.body td,.body th{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:3rem;font-family:var(--ui)}
+.pager button{min-height:52px;padding:8px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-weight:600}
+.pager button:hover{border-color:var(--accent);color:var(--accent)}
+.pager button.next{grid-column:2;background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.pager button.next:hover{filter:brightness(1.08);color:var(--accent-fg)}
+.pager button.prev{grid-column:1}
+.end{margin-top:2rem;padding-top:1.2rem;border-top:1px solid var(--line);font-family:var(--ui);font-size:.9rem;color:var(--muted)}
+.end a{color:var(--accent)}
+.loading{max-width:var(--read-width);margin:0 auto;padding-top:30vh;text-align:center;color:var(--muted)}
+.dots::after{content:"";animation:d 1.2s steps(4) infinite}
+@keyframes d{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+
+/* ---------- Настройки ---------- */
+.panel{position:fixed;z-index:20;top:calc(56px + env(safe-area-inset-top,0px));right:max(12px,env(safe-area-inset-right,0px));width:min(22rem,calc(100vw - 24px));padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 12px 40px rgba(0,0,0,.14);display:grid;gap:16px}
+.row{display:grid;gap:8px}
+.row label,.row .lbl{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;display:flex;justify-content:space-between}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{height:38px;border:0;background:transparent;border-right:1px solid var(--line);font-size:.92rem}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);font-weight:600}
+input[type=range]{width:100%;accent-color:var(--accent)}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div class="bar" id="bar" hidden>
+  <button class="ibtn" id="back" aria-label="Новая ссылка">←</button>
+  <div class="host" id="barHost"></div>
+  <button class="ibtn" id="prevTop" aria-label="Предыдущая страница" hidden>‹</button>
+  <button class="ibtn" id="nextTop" aria-label="Следующая страница" hidden>›</button>
+  <button class="ibtn" id="gear" aria-label="Настройки чтения" aria-expanded="false" aria-controls="panel">Aa</button>
+  <div class="progress" id="progress"></div>
+</div>
+
+<div class="panel" id="panel" hidden>
+  <div class="row"><span class="lbl">Тема</span>
+    <div class="seg" data-key="theme">
+      <button data-v="light">Светлая</button><button data-v="sepia">Сепия</button><button data-v="dark">Тёмная</button><button data-v="auto">Авто</button>
+    </div></div>
+  <div class="row"><span class="lbl">Шрифт</span>
+    <div class="seg" data-key="font"><button data-v="serif">С засечками</button><button data-v="sans">Без засечек</button></div></div>
+  <div class="row"><label for="size">Размер текста <span id="sizeV"></span></label><input type="range" id="size" min="15" max="30" step="1"></div>
+  <div class="row"><label for="lh">Межстрочный интервал <span id="lhV"></span></label><input type="range" id="lh" min="1.4" max="2.1" step="0.05"></div>
+  <div class="row"><span class="lbl">Ширина колонки</span>
+    <div class="seg" data-key="width"><button data-v="narrow">Узкая</button><button data-v="mid">Средняя</button><button data-v="wide">Широкая</button></div></div>
+</div>
+
+<main id="home" class="home">
+  <h1>Вставь ссылку и читай без мусора</h1>
+  <p class="lead">Читалка забирает со страницы только текст и показывает его в удобном виде. Ничего скачивать не нужно.</p>
+  <form class="form" id="form">
+    <input id="url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://сайт.com/глава-1" aria-label="Ссылка на страницу">
+    <button class="btn" type="submit">Читать</button>
+  </form>
+  <div class="err" id="err" role="alert" hidden></div>
+  <section class="recent" id="recent" hidden><h2>Недавнее</h2><ul id="recentList"></ul></section>
+</main>
+
+<div class="loading" id="loading" hidden>Загружаю текст<span class="dots"></span></div>
+
+<article class="article" id="article" hidden>
+  <header><h1 class="title" id="title"></h1><div class="meta" id="meta"></div></header>
+  <div class="body" id="body"></div>
+  <nav class="pager" id="pager" aria-label="Страницы"></nav>
+  <div class="end" id="end"></div>
+</article>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var root=document.documentElement;
+  var defaults={theme:"auto",font:"serif",size:19,lh:1.7,width:"mid"};
+  var widths={narrow:"32rem",mid:"38rem",wide:"48rem"};
+  var cfg=Object.assign({},defaults);
+
+  function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+
+  try{Object.assign(cfg,JSON.parse(lsGet("reader.cfg")||"{}"))}catch(e){}
+
+  function applyCfg(){
+    root.dataset.theme=cfg.theme;
+    var s=root.style;
+    s.setProperty("--read-font",cfg.font==="sans"?"var(--ui)":"var(--serif)");
+    s.setProperty("--read-size",cfg.size+"px");
+    s.setProperty("--read-lh",cfg.lh);
+    s.setProperty("--read-width",widths[cfg.width]||widths.mid);
+    document.querySelectorAll(".seg").forEach(function(seg){
+      seg.querySelectorAll("button").forEach(function(b){b.setAttribute("aria-pressed",String(b.dataset.v===String(cfg[seg.dataset.key])))});
+    });
+    $("size").value=cfg.size;$("sizeV").textContent=cfg.size+" px";
+    $("lh").value=cfg.lh;$("lhV").textContent=Number(cfg.lh).toFixed(2);
+    lsSet("reader.cfg",JSON.stringify(cfg));
+  }
+  document.querySelectorAll(".seg").forEach(function(seg){
+    seg.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;cfg[seg.dataset.key]=b.dataset.v;applyCfg()});
+  });
+  $("size").addEventListener("input",function(e){cfg.size=+e.target.value;applyCfg()});
+  $("lh").addEventListener("input",function(e){cfg.lh=+e.target.value;applyCfg()});
+  $("gear").addEventListener("click",function(){var open=$("panel").hidden;$("panel").hidden=!open;$("gear").setAttribute("aria-expanded",String(open))});
+  document.addEventListener("click",function(e){if(!$("panel").hidden&&!e.target.closest("#panel")&&!e.target.closest("#gear")){$("panel").hidden=true;$("gear").setAttribute("aria-expanded","false")}});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"){$("panel").hidden=true}});
+  applyCfg();
+
+  /* ---------- недавнее ---------- */
+  function getRecent(){try{return JSON.parse(lsGet("reader.recent")||"[]")}catch(e){return[]}}
+  function addRecent(item){var list=getRecent().filter(function(r){return r.url!==item.url});list.unshift(item);lsSet("reader.recent",JSON.stringify(list.slice(0,8)))}
+  function renderRecent(){
+    var list=getRecent(),ul=$("recentList");ul.innerHTML="";
+    $("recent").hidden=!list.length;
+    list.forEach(function(r){
+      var li=document.createElement("li"),a=document.createElement("a");
+      a.href="/?u="+encodeURIComponent(r.url);
+      var t=document.createElement("span");t.className="t";t.textContent=r.title;
+      var m=document.createElement("span");m.className="m";m.textContent=r.host;
+      a.append(t,m);li.append(a);ul.append(li);
+    });
+  }
+
+  /* ---------- экраны ---------- */
+  var currentUrl=null,nextUrl=null,prevUrl=null;
+  function show(which){
+    $("home").hidden=which!=="home";
+    $("loading").hidden=which!=="loading";
+    $("article").hidden=which!=="article";
+    $("bar").hidden=which==="home";
+    if(which!=="article"){$("nextTop").hidden=true;$("prevTop").hidden=true}
+    if(which==="home"){$("panel").hidden=true;renderRecent();document.title="Читалка"}
+  }
+  function showError(msg){show("home");$("err").textContent=msg;$("err").hidden=false}
+
+  function fmtDate(s){
+    if(!s)return"";
+    var d=new Date(s);if(isNaN(d))return s;
+    return d.toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"});
+  }
+
+  async function open(url,push){
+    currentUrl=url;$("err").hidden=true;$("url").value=url;
+    if(push)history.pushState(null,"","/?u="+encodeURIComponent(url));
+    $("barHost").textContent=url.replace(/^https?:\/\//,"");
+    show("loading");
+    try{
+      var r=await fetch("/api/read?url="+encodeURIComponent(url));
+      var data=await r.json().catch(function(){return{}});
+      if(!r.ok)throw new Error(data.detail||("Ошибка "+r.status));
+      render(data);
+    }catch(e){showError(e.message||"Не удалось загрузить страницу.")}
+  }
+
+  function render(d){
+    document.title=d.title;
+    $("title").textContent=d.title;
+    var meta=$("meta");meta.innerHTML="";
+    [d.author,fmtDate(d.date),d.sitename||d.host,d.minutes+" мин чтения"].forEach(function(t){if(t){var s=document.createElement("span");s.textContent=t;meta.append(s)}});
+    $("body").innerHTML=d.html;
+    var end=$("end");end.innerHTML="";
+    var a=document.createElement("a");a.href=d.url;a.target="_blank";a.rel="noopener noreferrer";a.textContent="Открыть оригинал";
+    end.append(a);
+    var pager=$("pager");pager.innerHTML="";
+    function pbtn(cls,label,url){
+      var b=document.createElement("button");b.type="button";b.className=cls;b.textContent=label;
+      b.addEventListener("click",function(){open(url,true)});pager.append(b);
+    }
+    if(d.prev)pbtn("prev","← Назад",d.prev);
+    if(d.next)pbtn("next","Далее →",d.next);
+    nextUrl=d.next||null;prevUrl=d.prev||null;
+    $("nextTop").hidden=!nextUrl;$("prevTop").hidden=!prevUrl;
+    $("barHost").textContent=d.host;
+    show("article");
+    addRecent({url:currentUrl,title:d.title,host:d.host});
+    var saved=parseFloat(lsGet("reader.pos."+currentUrl)||"0");
+    window.scrollTo(0,0);
+    if(saved>0.01)requestAnimationFrame(function(){window.scrollTo(0,saved*(document.documentElement.scrollHeight-innerHeight))});
+    updateProgress();
+  }
+
+  var saveT;
+  function updateProgress(){
+    var h=document.documentElement.scrollHeight-innerHeight;
+    var p=h>0?Math.min(1,Math.max(0,scrollY/h)):0;
+    $("progress").style.transform="scaleX("+p+")";
+    if(currentUrl&&!$("article").hidden){clearTimeout(saveT);saveT=setTimeout(function(){lsSet("reader.pos."+currentUrl,p>0.98?"0":String(p))},400)}
+  }
+  addEventListener("scroll",updateProgress,{passive:true});
+
+  /* ---------- события ---------- */
+  $("form").addEventListener("submit",function(e){
+    e.preventDefault();
+    var v=$("url").value.trim();if(!v)return;
+    if(!/^[a-z]+:\/\//i.test(v))v="https://"+v;
+    open(v,true);
+  });
+  $("back").addEventListener("click",function(){currentUrl=null;history.pushState(null,"","/");show("home");$("url").value="";$("url").focus()});
+  $("nextTop").addEventListener("click",function(){if(nextUrl)open(nextUrl,true)});
+  $("prevTop").addEventListener("click",function(){if(prevUrl)open(prevUrl,true)});
+  document.addEventListener("keydown",function(e){
+    if(e.target.closest&&e.target.closest("input,textarea"))return;
+    if($("article").hidden||e.altKey||e.ctrlKey||e.metaKey)return;
+    if(e.key==="ArrowRight"&&nextUrl)open(nextUrl,true);
+    if(e.key==="ArrowLeft"&&prevUrl)open(prevUrl,true);
+  });
+  addEventListener("popstate",route);
+
+  function route(){
+    var u=new URLSearchParams(location.search).get("u");
+    if(u)open(u,false);else{currentUrl=null;show("home")}
+  }
+  route();
+})();
+</script>
+</body>
+</html>
